@@ -33,17 +33,18 @@ export const claudeAdapter: SiteAdapter = {
 
   fetchRaw: (session, id, cancel) => fetchConversation(session, id, cancel),
 
-  fetchIRContext: async (session, id, raw, cancel): Promise<ClaudeIRContext> => {
-    // 普通对话没有 present_files，没必要额外打一遍沙箱接口。
-    if (!hasPresentFiles(raw as ClaudeConversation)) return { sandboxFiles: [] }
-    try {
-      return { sandboxFiles: await listSandboxFiles(session, id, cancel) }
-    } catch (error) {
-      if (cancel?.cancelled) throw error
-      // 附件发现失败不应吞掉整篇正文；转换层会在文件卡片原位留下说明。
-      return { sandboxFiles: [], sandboxUnavailable: true }
-    }
-  },
+  createIRContextResolver: (session, cancel) =>
+    async (id, raw): Promise<ClaudeIRContext> => {
+      // 普通对话没有 present_files，没必要额外打一遍沙箱接口。
+      if (!hasPresentFiles(raw as ClaudeConversation)) return { sandboxFiles: [] }
+      try {
+        return { sandboxFiles: await listSandboxFiles(session, id, cancel) }
+      } catch (error) {
+        if (cancel?.cancelled) throw error
+        // 附件发现失败不应吞掉整篇正文；转换层会在文件卡片原位留下说明。
+        return { sandboxFiles: [], sandboxUnavailable: true }
+      }
+    },
 
   toIR: (raw, fallbackId, context) =>
     conversationToIR(

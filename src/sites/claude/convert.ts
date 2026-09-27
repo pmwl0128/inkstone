@@ -15,6 +15,7 @@ import type {
 } from './types'
 
 interface Ctx {
+  conversationId: string
   /** blockKey → 重放成功的 artifact 操作；不在表里的走原始 JSON 兜底 */
   artifacts: Map<string, ArtifactOp>
   sandboxByPath: Map<string, ClaudeSandboxFile>
@@ -34,7 +35,7 @@ export function conversationToIR(
   const convId = String(conv.uuid ?? fallbackId)
   const title = (conv.name ?? '').trim() || 'Untitled'
   const messages = linearize(conv)
-  const ctx = buildContext(messages, sandboxFiles, sandboxUnavailable)
+  const ctx = buildContext(convId, messages, sandboxFiles, sandboxUnavailable)
 
   const turns: IRTurn[] = groupTurns(messages).map((t) => ({
     role: t.role,
@@ -199,7 +200,7 @@ function toolUseBlocks(
       files = ctx.sandboxOutputs
     }
     if (files.length > 0) {
-      return [{ kind: 'assetList', refs: files.map(sandboxAssetRef) }]
+      return [{ kind: 'assetList', refs: files.map((file) => sandboxAssetRef(file, ctx.conversationId)) }]
     }
     if (ctx.sandboxUnavailable) {
       return [{ kind: 'note', text: '*(Claude 生成文件清单获取失败，本次未能下载这些文件)*' }]
@@ -297,6 +298,7 @@ function toolUseBlocks(
 }
 
 function buildContext(
+  conversationId: string,
   messages: readonly ClaudeMessage[],
   sandboxFiles: readonly ClaudeSandboxFile[],
   sandboxUnavailable: boolean,
@@ -317,6 +319,7 @@ function buildContext(
   }
 
   const provisional: Ctx = {
+    conversationId,
     artifacts: replayArtifacts(messages),
     sandboxByPath,
     sandboxByBasename,
@@ -376,11 +379,12 @@ function deepPathStrings(value: unknown, out: string[] = []): string[] {
   return out
 }
 
-function sandboxAssetRef(file: ClaudeSandboxFile): AssetRef {
+function sandboxAssetRef(file: ClaudeSandboxFile, conversationId: string): AssetRef {
   const name = basename(file.path) || 'file'
   const mime = str(file.content_type)
   return {
-    fileId: `wiggle-${hashPath(file.path)}`,
+    // 沙箱路径只在单个对话内唯一；常见的 report.md / summary.md 会跨对话重名。
+    fileId: `wiggle-${hashSandboxFile(conversationId, file.path)}`,
     kind: isImageFile(name, mime) ? 'image' : 'file',
     name,
     url: file.download_url,
@@ -405,9 +409,9 @@ function outputRank(path: string): number {
   return normalizePath(path).startsWith('/mnt/user-data/outputs/') ? 0 : 1
 }
 
-function hashPath(path: string): string {
+function hashSandboxFile(conversationId: string, path: string): string {
   let hash = 0x811c9dc5
-  for (const ch of normalizePath(path)) {
+  for (const ch of `${conversationId}\0${normalizePath(path)}`) {
     hash ^= ch.charCodeAt(0)
     hash = Math.imul(hash, 0x01000193)
   }

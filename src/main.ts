@@ -313,6 +313,7 @@ function createProcessor(
   // 失败/超限只写进正文占位文字，完成文案里要显式报数，否则像无事发生
   let assetsFailed = 0
   let assetsSkipped = 0
+  const resolveIRContext = site.createIRContextResolver?.(session, cancel)
 
   async function resolveAsset(a: AssetRef): Promise<string> {
     const cached = assetCache.get(a.fileId)
@@ -373,9 +374,7 @@ function createProcessor(
       await sink.put(path, strToU8(JSON.stringify(raw, null, 2)))
       return { path }
     }
-    const irContext = site.fetchIRContext
-      ? await site.fetchIRContext(session, item.id, raw, cancel)
-      : undefined
+    const irContext = resolveIRContext ? await resolveIRContext(item.id, raw) : undefined
     checkBatchSafety?.()
     const { markdown, title, assets } = renderConversation(site.toIR(raw, item.id, irContext), {
       thoughts: opts.thoughts,

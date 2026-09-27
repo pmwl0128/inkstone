@@ -11,6 +11,7 @@ export type {
   SiteBatch,
   SiteConversationItem,
   SiteId,
+  SiteIRContextResolver,
   SitePager,
   SiteUi,
 } from './types'

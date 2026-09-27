@@ -85,7 +85,10 @@ export function renderConversation(conv: IRConversation, copts: ConvertOptions =
 
   const sources: SourceLink[] = []
   const assets: AssetRef[] = []
-  const prose = (text: string): string => transformHeadings(convertMath(text), headingMode)
+  // ChatGPT 的正文用 \(...\) / \[...\] 表示公式，因此裸 "$123" 可以安全按货币转义；
+  // Claude 会直接输出 $...$，数字开头的原生公式不能套这条规则。
+  const prose = (text: string): string =>
+    transformHeadings(convertMath(text, conv.source === 'chatgpt'), headingMode)
 
   const renderBlock = (b: IRBlock): string | null => {
     switch (b.kind) {

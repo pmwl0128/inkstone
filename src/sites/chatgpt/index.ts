@@ -11,8 +11,13 @@ import {
 } from '../../api'
 import type { AssetRef } from '../../core/ir'
 import type { CancelToken } from '../../core/fetcher'
-import type { ConversationDetail, ConversationListItem } from '../../types'
-import type { AssetPayload, SiteAdapter, SiteConversationItem } from '../types'
+import type { ConversationDetail, ConversationListItem, ProjectInfo } from '../../types'
+import type {
+  AssetPayload,
+  SiteAdapter,
+  SiteConversationItem,
+  SiteIRContextResolver,
+} from '../types'
 import { conversationToIR } from './convert'
 
 const toItem = (i: ConversationListItem): SiteConversationItem => ({
@@ -24,6 +29,31 @@ const toItem = (i: ConversationListItem): SiteConversationItem => ({
 
 interface ChatGPTIRContext {
   projectName?: string
+}
+
+type ProjectLoader = (session: string, cancel?: CancelToken) => Promise<ProjectInfo[]>
+
+/** project 侧栏每次导出至多补拉一次；自定义 GPT 的 gizmo_id 查不到也不会重复请求。 */
+export function createChatGPTIRContextResolver(
+  session: string,
+  cancel?: CancelToken,
+  loadProjects: ProjectLoader = listProjects,
+): SiteIRContextResolver {
+  let projectsPass: Promise<unknown> | null = null
+  return async (_id, raw): Promise<ChatGPTIRContext> => {
+    const gizmoId = (raw as ConversationDetail).gizmo_id
+    if (!gizmoId) return {}
+    const known = projectNameOf(gizmoId)
+    if (known) return { projectName: known }
+    projectsPass ??= loadProjects(session, cancel)
+    try {
+      await projectsPass
+    } catch (error) {
+      if (cancel?.cancelled) throw error
+      return {}
+    }
+    return { projectName: projectNameOf(gizmoId) }
+  }
 }
 
 export const chatgptAdapter: SiteAdapter = {
@@ -42,19 +72,7 @@ export const chatgptAdapter: SiteAdapter = {
 
   fetchRaw: (session, id, cancel) => fetchConversation(session, id, cancel),
 
-  fetchIRContext: async (session, _id, raw, cancel): Promise<ChatGPTIRContext> => {
-    const gizmoId = (raw as ConversationDetail).gizmo_id
-    if (!gizmoId) return {}
-    const known = projectNameOf(gizmoId)
-    if (known) return { projectName: known }
-    try {
-      await listProjects(session, cancel)
-    } catch (error) {
-      if (cancel?.cancelled) throw error
-      return {}
-    }
-    return { projectName: projectNameOf(gizmoId) }
-  },
+  createIRContextResolver: createChatGPTIRContextResolver,
 
   toIR: (raw, fallbackId, context) =>
     conversationToIR(

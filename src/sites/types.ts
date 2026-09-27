@@ -47,6 +47,9 @@ export interface SitePager {
   next(): Promise<{ items: SiteConversationItem[]; done: boolean }>
 }
 
+/** 一次导出内复用的 IR 上下文解析器；可安全缓存站点级补充请求。 */
+export type SiteIRContextResolver = (id: string, raw: unknown) => Promise<unknown>
+
 /** 批量导出能力。supportsBatch 为 true 时必须提供。 */
 export interface SiteBatch {
   /** 站点专属风控；编排层不得自行猜测未知站点可承受的并发与重试。 */
@@ -81,13 +84,14 @@ export interface SiteAdapter {
   fetchRaw(session: string, id: string, cancel?: CancelToken): Promise<unknown>
   /** 原始 JSON → IR */
   toIR(raw: unknown, fallbackId: string, context?: unknown): IRConversation
-  /** Markdown 转换前需要额外拉取的站点数据（例如 Claude 会话沙箱文件清单）。 */
-  fetchIRContext?(
+  /**
+   * 为本次导出创建上下文解析器。工厂每个 processor 只调用一次，因此解析器可以
+   * 复用 project 列表等补充请求；具体会话的数据仍由返回函数按 id/raw 解析。
+   */
+  createIRContextResolver?(
     session: string,
-    id: string,
-    raw: unknown,
     cancel?: CancelToken,
-  ): Promise<unknown>
+  ): SiteIRContextResolver
   /** 取附件字节 */
   fetchAsset(
     session: string,

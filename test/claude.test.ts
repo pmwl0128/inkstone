@@ -285,6 +285,33 @@ describe('附件', () => {
     expect(rendered.assets.find((a) => a.name === 'certificate_scatter.py')?.url).toContain('/api/wiggle/download')
   })
 
+  test('不同对话的同路径生成文件使用不同 fileId', () => {
+    const makeConversation = (uuid: string) => {
+      const conv = withBlocks([
+        {
+          type: 'tool_use',
+          name: 'present_files',
+          input: { files: [{ file_path: '/mnt/user-data/outputs/report.md' }] },
+        },
+      ])
+      conv.uuid = uuid
+      return conv
+    }
+    const sandbox: ClaudeSandboxFile[] = [
+      {
+        path: '/mnt/user-data/outputs/report.md',
+        content_type: 'text/markdown',
+        download_url: '/api/wiggle/download?path=report.md',
+      },
+    ]
+    const first = renderConversation(conversationToIR(makeConversation('conversation-a'), '', sandbox)).assets[0]
+    const again = renderConversation(conversationToIR(makeConversation('conversation-a'), '', sandbox)).assets[0]
+    const second = renderConversation(conversationToIR(makeConversation('conversation-b'), '', sandbox)).assets[0]
+
+    expect(first?.fileId).toBe(again?.fileId)
+    expect(first?.fileId).not.toBe(second?.fileId)
+  })
+
   test('present_files 参数无法识别时只回退一次 outputs 全集', () => {
     const conv = withBlocks([
       { type: 'tool_use', name: 'present_files', input: { future_shape: true } },
@@ -320,6 +347,15 @@ describe('附件', () => {
     const out = renderConversation(conversationToIR(conv, '', [], true)).markdown
     expect(out).toContain('正文保留')
     expect(out).toContain('Claude 生成文件清单获取失败，本次未能下载这些文件')
+  })
+})
+
+describe('公式', () => {
+  test('Claude 原生数字开头行内公式不按货币转义', () => {
+    const out = md(withBlocks([{ type: 'text', text: '解方程 $2x+1=5$，得 $x=2$；复杂度 $10^{6}$ 次' }]))
+    expect(out).toContain('解方程 $2x+1=5$，得 $x=2$；复杂度 $10^{6}$ 次')
+    expect(out).not.toContain('\\$2x+1=5$')
+    expect(out).not.toContain('\\$10^{6}$')
   })
 })
 
