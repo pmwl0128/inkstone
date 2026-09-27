@@ -100,6 +100,10 @@ export interface PanelCallbacks {
 const STYLE = `
   :host { all: initial; }
   :host {
+    /* 页面外层样式对 shadow host 的优先级高于 :host 规则；真正的关键属性还会在
+       mountPanel 里以内联 !important 固定，避免 ChatGPT 顶栏 surface 把入口压住。 */
+    position: fixed; left: 0; top: 0; width: 0; height: 0; overflow: visible;
+    z-index: 2147483647; isolation: isolate; pointer-events: none;
     --fg: #0d0d0d; --muted: #5d5d63;
     --glass: rgba(255, 255, 255, .62); --solid: #f7f7f8;
     --edge: rgba(255, 255, 255, .65);
@@ -148,6 +152,7 @@ const STYLE = `
     /* right/bottom 过渡只在布局变化的一瞬生效（侧栏开合、输入框长高），平时零开销 */
     transition: transform .15s var(--ease), background-color .2s var(--ease), color .2s var(--ease),
       right .25s var(--ease), bottom .25s var(--ease);
+    pointer-events: auto;
   }
   .fab.in { visibility: visible; animation: pop .3s var(--ease); }
   @keyframes pop { from { opacity: 0; transform: scale(.5); } }
@@ -179,6 +184,17 @@ const STYLE = `
     background: transparent; border-color: transparent; box-shadow: none;
     -webkit-backdrop-filter: blur(24px); backdrop-filter: blur(24px);
   }
+  /* ChatGPT 新顶栏本身是全宽 surface；给入口一层轻底色，避免图标与 surface 融在一起。 */
+  :host([data-site="chatgpt"][data-pos="header"]) .fab {
+    background: var(--hover); border-color: var(--border); box-shadow: inset 0 1px 0 var(--edge);
+  }
+  :host([data-site="chatgpt"][data-pos="header"][data-theme="dark"]) .fab:not(.open) {
+    color: #fff; background: rgba(255, 255, 255, .14); border-color: rgba(255, 255, 255, .2);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .18), 0 2px 8px rgba(0, 0, 0, .24);
+  }
+  :host([data-site="chatgpt"][data-pos="header"][data-theme="dark"]) .fab:not(.open):hover {
+    background: rgba(255, 255, 255, .21);
+  }
   :host([data-pos="header"]) .fab.in { animation: fadein .2s var(--ease); }
   :host([data-pos="header"]) .fab:hover { background: var(--hover); transform: none; }
   :host([data-pos="header"]) .fab:active { background: var(--track); transform: none; }
@@ -202,6 +218,7 @@ const STYLE = `
     max-width: calc(100vw - 32px);
     transform-origin: 100% 100%;
     transition: left .25s var(--ease), right .25s var(--ease), bottom .25s var(--ease);
+    pointer-events: auto;
   }
   .panel.open { display: block; animation: rise .22s var(--ease); }
   @keyframes rise { from { opacity: 0; transform: translateY(10px) scale(.97); } }
@@ -382,6 +399,27 @@ export function mountPanel(cb: PanelCallbacks): void {
   if (document.querySelector('[data-inkstone]')) return
   const host = document.createElement('div')
   host.dataset['inkstone'] = ''
+  host.dataset['site'] = cb.site.id
+  // document author styles can override shadow :host declarations. ChatGPT 新顶栏用一块
+  // 全宽 surface 建立自己的层叠上下文，因此宿主必须在 light DOM 侧成为最高层 overlay。
+  // 宿主本身不接收指针，shadow 内的按钮/面板单独恢复 pointer-events。
+  for (const [name, value] of [
+    ['position', 'fixed'],
+    ['left', '0'],
+    ['top', '0'],
+    ['width', '0'],
+    ['height', '0'],
+    ['display', 'block'],
+    ['overflow', 'visible'],
+    ['visibility', 'visible'],
+    ['opacity', '1'],
+    ['pointer-events', 'none'],
+    ['z-index', '2147483647'],
+    ['isolation', 'isolate'],
+    ['transform', 'none'],
+  ] as const) {
+    host.style.setProperty(name, value, 'important')
+  }
   const root = host.attachShadow({ mode: 'open' })
 
   // —— 主色跟随当前页面 ——
@@ -481,12 +519,14 @@ export function mountPanel(cb: PanelCallbacks): void {
   }
 
   // 跟随页面的明暗与主题色设置（判定方式由站点适配器给）
-  const syncTheme = () => {
-    host.dataset['theme'] = cb.siteUi.isDark() ? 'dark' : 'light'
-    detectAccent(true) // 明暗/主题色切换时 accent 值跟着变
+  const syncTheme = (forceAccent = true) => {
+    const nextTheme = cb.siteUi.isDark() ? 'dark' : 'light'
+    const changed = host.dataset['theme'] !== nextTheme
+    host.dataset['theme'] = nextTheme
+    detectAccent(forceAccent || changed) // 明暗/主题色切换时 accent 值跟着变
   }
   syncTheme()
-  new MutationObserver(syncTheme).observe(document.documentElement, {
+  new MutationObserver(() => syncTheme(true)).observe(document.documentElement, {
     attributes: true,
     attributeFilter: cb.siteUi.themeAttributes,
   })
@@ -670,6 +710,7 @@ export function mountPanel(cb: PanelCallbacks): void {
   const rebindAnchor = (): boolean => {
     const c = findAnchor()
     if (c !== anchor) {
+      if (anchor) closePanel()
       ro?.disconnect()
       anchor = c
       if (c) ro?.observe(c)
@@ -708,14 +749,19 @@ export function mountPanel(cb: PanelCallbacks): void {
   // 维护期：500ms 纯位置同步（锚点平移不触发 ResizeObserver），2s 一次全量重找 + accent 重读；
   // 锚点回来（或迟到）时在这里重新现身
   let tick = 0
+  let pageHref = location.href
   setInterval(() => {
+    if (location.href !== pageHref) {
+      pageHref = location.href
+      closePanel()
+    }
     if (++tick % 4 === 0) {
       const positioned = rebindAnchor()
       if (bootDone && positioned && !fab.classList.contains('in')) {
         detectAccent(true)
         fab.classList.add('in')
       }
-      detectAccent()
+      syncTheme(false)
     } else {
       syncPos()
     }

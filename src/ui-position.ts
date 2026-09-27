@@ -46,8 +46,15 @@ export function computeFabPlacement(
 
   if (mode === 'header') {
     if (rect.top < 0) return null
+    const anchorWidth = rect.right - rect.left
+    // 新会话的某些 ChatGPT 变体没有 Share/Profile 等右侧动作，adapter 会把
+    // 完整顶栏作为兜底锚点。此时按钮放进顶栏右内边距，而不是放到顶栏左侧视口外。
+    const right =
+      anchorWidth >= viewport.width * 0.5
+        ? Math.max(8, Math.round(viewport.width - rect.right + 8))
+        : Math.round(viewport.width - rect.left + gap)
     return {
-      right: Math.round(viewport.width - rect.left + gap),
+      right,
       bottom: Math.round(viewport.height - rect.bottom + (rect.height - size) / 2),
       panelTop: Math.round(rect.bottom + 10),
     }

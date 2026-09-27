@@ -50,4 +50,60 @@ describe('computeFabPlacement', () => {
       ),
     ).toEqual({ right: 60, bottom: 860, panelTop: 50 })
   })
+
+  test('ChatGPT 新会话工作模式没有右侧动作时贴顶栏右内边距', () => {
+    expect(
+      computeFabPlacement(
+        'header',
+        { top: 0, right: 630, bottom: 52, left: 0, height: 52 },
+        { width: 630, height: 898 },
+        36,
+        8,
+      ),
+    ).toEqual({ right: 8, bottom: 854, panelTop: 62 })
+  })
+
+  test('ChatGPT 四种探针结构的 header 锚点均避开原生控件', () => {
+    const viewport = { width: 630, height: 898 }
+    const cases = [
+      {
+        rect: { top: 8, right: 536, bottom: 44, left: 462.7, height: 36 },
+        expected: { right: 175, bottom: 854, panelTop: 54 },
+      }, // 会话打开 · 工作：Share
+      {
+        rect: { top: 8, right: 578, bottom: 44, left: 504.7, height: 36 },
+        expected: { right: 133, bottom: 854, panelTop: 54 },
+      }, // 会话打开 · 聊天：Share
+      {
+        rect: { top: 0, right: 630, bottom: 52, left: 0, height: 52 },
+        expected: { right: 8, bottom: 854, panelTop: 62 },
+      }, // 新会话页 · 工作：完整顶栏兜底
+      {
+        rect: { top: 8, right: 622, bottom: 44, left: 586, height: 36 },
+        expected: { right: 52, bottom: 854, panelTop: 54 },
+      }, // 新会话页 · 聊天：右侧动作
+    ]
+    for (const { rect, expected } of cases) {
+      expect(computeFabPlacement('header', rect, viewport, 36, 8)).toEqual(expected)
+    }
+  })
+
+  test('ChatGPT 四种探针结构的 composer 都落在输入区上方且不越界', () => {
+    const viewport = { width: 630, height: 898 }
+    const cases = [
+      { top: 740, right: 614, bottom: 797, left: 16, height: 57 }, // 会话打开 · 工作
+      { top: 755, right: 614, bottom: 842, left: 16, height: 87 }, // 会话打开 · 聊天
+      { top: 732, right: 604, bottom: 789, left: 16, height: 57 }, // 新会话页 · 工作
+      { top: 787, right: 604, bottom: 874, left: 16, height: 87 }, // 新会话页 · 聊天
+    ]
+    for (const rect of cases) {
+      const placement = computeFabPlacement('composer', rect, viewport, 44, 12)
+      expect(placement).not.toBeNull()
+      const fabTop = viewport.height - placement!.bottom - 44
+      const fabRight = viewport.width - placement!.right
+      expect(fabTop).toBeGreaterThanOrEqual(8)
+      expect(fabTop + 44).toBeLessThanOrEqual(rect.top - 12)
+      expect(fabRight).toBeLessThanOrEqual(viewport.width - 8)
+    }
+  })
 })
