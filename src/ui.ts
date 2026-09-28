@@ -137,7 +137,9 @@ const STYLE = `
   input[type="checkbox"] { accent-color: var(--accent); margin: 0; width: 14px; height: 14px; cursor: pointer; }
 
   .fab {
-    position: fixed; right: var(--fab-right, 20px); bottom: var(--fab-bottom, 88px); z-index: 2147483646;
+    /* Claude 的菜单、搜索结果和设置/usage 弹层使用更高的应用层级（通常是 z-50）。
+       保持在普通页面内容之上，但不要压过这些页面级弹层。 */
+    position: fixed; right: var(--fab-right, 20px); bottom: var(--fab-bottom, 88px); z-index: 40;
     width: 44px; height: 44px; border-radius: 50%; overflow: hidden;
     visibility: hidden; /* 定位完成（.in）前不现身，避免从默认角落跳到输入框旁 */
     color: var(--fg); border: 1px solid var(--border);
@@ -189,7 +191,7 @@ const STYLE = `
   @keyframes fadein { from { opacity: 0; } }
 
   .panel {
-    position: fixed; right: var(--fab-right, 20px); bottom: calc(var(--fab-bottom, 88px) + 56px); z-index: 2147483647;
+    position: fixed; right: var(--fab-right, 20px); bottom: calc(var(--fab-bottom, 88px) + 56px); z-index: 41;
     width: 304px; padding: 16px; border-radius: 20px;
     color: var(--fg); border: 1px solid var(--border);
     background: var(--glass);
