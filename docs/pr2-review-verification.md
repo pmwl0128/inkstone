@@ -10,7 +10,7 @@
 
 ## 自动验证
 
-2026-10-05（Asia/Shanghai）验证：`bun test` 182 pass / 0 fail；`bun run typecheck` 和 `bun run build` 通过。Chromium 检查以下合成接口场景，真实账号验证仍待运行下面的探针。
+2026-10-05（Asia/Shanghai）自动验证：`bun test` 182 pass / 0 fail；`bun run typecheck` 和 `bun run build` 通过。Chromium 检查以下合成接口场景。2026-10-06，提交者反馈真实登录环境手工判断无误，并确认推送修复与更新 PR。
 
 回归测试覆盖当前组织不是第一项、组织选择/取消、cookie 损坏、单组织、GM/localStorage 升级迁移、重置后不复活旧记录，以及正文保留与附件发现失败标记。
 
@@ -28,7 +28,7 @@ bun run test:browser
 
 ## 真实登录环境检查
 
-组织 cookie 是否仍能代表当前页面工作区、真实账号返回的组织列表形态，以及当前沙箱端点可用性，需要在登录环境中核实。
+提交者已反馈本次登录环境手工检查无误。以下步骤保留用于复查当前工作区标记、组织列表形态与沙箱端点可用性。
 
 1. 在已登录的 `claude.ai` 打开一条包含生成文件的对话。若有个人和团队工作区，先切到非列表第一项的工作区。
 2. F12 → Console，复制并运行 [claude-workspace-probe.js](./claude-workspace-probe.js) 的全部内容。
@@ -38,4 +38,4 @@ bun run test:browser
 
 关注 `workspace.activeMembershipIndex`、`workspace.activeIsFirst`、`workspace.selectionRequiresUser`、`workspace.cookieChangedDuringProbe`，以及 `current-conversation` / `sandbox-list` 的请求状态。切换工作区后分别运行，报告应与实际操作对应；如果活跃 cookie 缺失或不匹配，先保留报告，导出时会要求显式选择。
 
-安装修复后的脚本后，还应人工确认工作区选择框和实际下载结果。自动测试使用合成数据，不代表真实账号的端到端验收已完成。
+复查时可安装修复后的脚本，确认工作区选择框和实际下载结果。上述自动测试使用合成数据；本次真实登录环境的手工结论由提交者提供。
