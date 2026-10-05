@@ -10,7 +10,7 @@
 
 ## 自动验证
 
-2026-10-06（Asia/Shanghai）验证：`bun test` 182 pass / 0 fail；`bun run typecheck` 和 `bun run build` 通过。Chromium 检查以下合成接口场景，真实账号验证仍待运行下面的探针。
+2026-10-05（Asia/Shanghai）验证：`bun test` 182 pass / 0 fail；`bun run typecheck` 和 `bun run build` 通过。Chromium 检查以下合成接口场景，真实账号验证仍待运行下面的探针。
 
 回归测试覆盖当前组织不是第一项、组织选择/取消、cookie 损坏、单组织、GM/localStorage 升级迁移、重置后不复活旧记录，以及正文保留与附件发现失败标记。
 
