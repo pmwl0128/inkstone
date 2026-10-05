@@ -99,11 +99,12 @@ export interface PanelCallbacks {
 // 高光扫过用纯 transform 位移；不用色差/SVG morphing/hue-rotate 这类高开销滤镜。
 const STYLE = `
   :host { all: initial; }
-  :host {
-    /* 页面外层样式对 shadow host 的优先级高于 :host 规则；真正的关键属性还会在
-       mountPanel 里以内联 !important 固定，避免 ChatGPT 顶栏 surface 把入口压住。 */
+  :host([data-site="chatgpt"]) {
+    /* ChatGPT 顶栏 surface 建立独立层叠上下文；仅此站点需要最高层 overlay。 */
     position: fixed; left: 0; top: 0; width: 0; height: 0; overflow: visible;
     z-index: 2147483647; isolation: isolate; pointer-events: none;
+  }
+  :host {
     --fg: #0d0d0d; --muted: #5d5d63;
     --glass: rgba(255, 255, 255, .62); --solid: #f7f7f8;
     --edge: rgba(255, 255, 255, .65);
@@ -405,22 +406,26 @@ export function mountPanel(cb: PanelCallbacks): void {
   // document author styles can override shadow :host declarations. ChatGPT 新顶栏用一块
   // 全宽 surface 建立自己的层叠上下文，因此宿主必须在 light DOM 侧成为最高层 overlay。
   // 宿主本身不接收指针，shadow 内的按钮/面板单独恢复 pointer-events。
-  for (const [name, value] of [
-    ['position', 'fixed'],
-    ['left', '0'],
-    ['top', '0'],
-    ['width', '0'],
-    ['height', '0'],
-    ['display', 'block'],
-    ['overflow', 'visible'],
-    ['visibility', 'visible'],
-    ['opacity', '1'],
-    ['pointer-events', 'none'],
-    ['z-index', '2147483647'],
-    ['isolation', 'isolate'],
-    ['transform', 'none'],
-  ] as const) {
-    host.style.setProperty(name, value, 'important')
+  // Claude 沿用非定位 host，让 40/41 的子元素参与页面层叠。fixed + z-index:auto
+  // 也会创建层叠上下文，不能只降低 host 的 z-index。
+  if (cb.site.id === 'chatgpt') {
+    for (const [name, value] of [
+      ['position', 'fixed'],
+      ['left', '0'],
+      ['top', '0'],
+      ['width', '0'],
+      ['height', '0'],
+      ['display', 'block'],
+      ['overflow', 'visible'],
+      ['visibility', 'visible'],
+      ['opacity', '1'],
+      ['pointer-events', 'none'],
+      ['z-index', '2147483647'],
+      ['isolation', 'isolate'],
+      ['transform', 'none'],
+    ] as const) {
+      host.style.setProperty(name, value, 'important')
+    }
   }
   const root = host.attachShadow({ mode: 'open' })
 
