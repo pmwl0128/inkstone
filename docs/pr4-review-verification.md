@@ -30,7 +30,7 @@ bun run test:browser
 
 ## 真实登录环境检查
 
-合成 DOM 验证层叠规则与已知锚点选择，不代表网站当前所有灰度布局和菜单都已验证。真实菜单/搜索结果/设置浮层的结构与层级需要在登录环境中检查。
+2026-10-06，提交者反馈真实登录环境手工判断无误，并确认推送修复与更新 PR。合成 DOM 验证覆盖层叠规则与已知锚点选择；以下步骤保留用于复查实际菜单、搜索结果、设置浮层及其他灰度布局。
 
 先从当前分支构建 `dist/inkstone.user.js` 并安装到 Tampermonkey，刷新页面确认生效；若安装了其他 Inkstone 版本，应只启用本次测试版本。然后在 F12 → Console 运行 [ui-overlay-probe.js](./ui-overlay-probe.js) 全文，保存 `INKSTONE_UI_OVERLAY_PROBE_BEGIN/END` 之间的 JSON。
 
