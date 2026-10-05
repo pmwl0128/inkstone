@@ -313,6 +313,7 @@ function createProcessor(
   // 失败/超限只写进正文占位文字，完成文案里要显式报数，否则像无事发生
   let assetsFailed = 0
   let assetsSkipped = 0
+  let discoveryFailed = 0
   const resolveIRContext = site.createIRContextResolver?.(session, cancel)
 
   async function resolveAsset(a: AssetRef): Promise<string> {
@@ -357,7 +358,8 @@ function createProcessor(
   function assetSummary(): string {
     return (
       (assetsFailed > 0 ? `，附件失败 ${assetsFailed} 个` : '') +
-      (assetsSkipped > 0 ? `，附件超限跳过 ${assetsSkipped} 个` : '')
+      (assetsSkipped > 0 ? `，附件超限跳过 ${assetsSkipped} 个` : '') +
+      (discoveryFailed > 0 ? `，${discoveryFailed} 个对话附件发现失败，正文已保留，下次增量导出重试` : '')
     )
   }
 
@@ -365,7 +367,7 @@ function createProcessor(
     return `*(附件未下载：${a.name ?? a.fileId}，${fmtSize(actual)} 超过 ${fmtSize(cap)} 上限)*`
   }
 
-  async function processConversation(item: SiteConversationItem): Promise<{ path: string }> {
+  async function processConversation(item: SiteConversationItem): Promise<{ path: string; incompleteReason?: string }> {
     checkBatchSafety?.()
     const raw = await site.fetchRaw(session, item.id, cancel)
     checkBatchSafety?.()
@@ -376,7 +378,12 @@ function createProcessor(
     }
     const irContext = resolveIRContext ? await resolveIRContext(item.id, raw) : undefined
     checkBatchSafety?.()
-    const { markdown, title, assets } = renderConversation(site.toIR(raw, item.id, irContext), {
+    const ir = site.toIR(raw, item.id, irContext)
+    const incompleteReason = opts.assets && ir.assetDiscoveryFailed
+      ? '附件发现失败：正文已保留，未推进水位线，下次增量导出重试'
+      : undefined
+    if (incompleteReason) discoveryFailed++
+    const { markdown, title, assets } = renderConversation(ir, {
       thoughts: opts.thoughts,
       toolTraces: opts.toolTraces,
       headingMode: opts.headingMode,
@@ -397,7 +404,7 @@ function createProcessor(
     }
     const path = `${notesPrefix}${filenameFor(title, item.id)}`
     await sink.put(path, strToU8(md))
-    return { path }
+    return { path, incompleteReason }
   }
 
   return { processConversation, assetSummary }
@@ -526,6 +533,7 @@ async function exportItems(
   const wmDraft: Watermark = { ...loadWatermark(wmKey(kind)) }
   const proc = createProcessor(kind, session, cancel, panel, opts, sink, checkBatchSafety)
   let safetyReason: string | null = null
+  const incompleteReasons = new Map<string, string>()
 
   // 单条失败不中断，收集后统一重试；失败过多则保护性中止（防止触发/加重账号级反滥用），
   // 已抓取的内容照常落地
@@ -552,8 +560,20 @@ async function exportItems(
           return
         }
         try {
-          await proc.processConversation(item)
-          wmDraft[item.id] = String(item.update_time ?? '')
+          const result = await proc.processConversation(item)
+          if (result.incompleteReason) {
+            failed.push(item)
+            incompleteReasons.set(item.id, result.incompleteReason)
+            // 所选/全量导出也可能重导已有记录；删去旧值才能保证下一次增量重新尝试。
+            delete wmDraft[item.id]
+            if (failureLimitReached(policy, failed.length, done + 1)) {
+              safetyReason = `失败率过高（${failed.length}/${done + 1}），已停止后续请求`
+              aborted = true
+            }
+          } else {
+            incompleteReasons.delete(item.id)
+            wmDraft[item.id] = String(item.update_time ?? '')
+          }
         } catch (e) {
           if (e instanceof CancelledError) throw e
           failed.push(item)
@@ -613,7 +633,7 @@ async function exportItems(
     ...failedItems.map((i) => ({
       id: i.id,
       title: i.title,
-      error: '多次重试后仍失败（限流隔离或对话不可用）',
+      error: incompleteReasons.get(i.id) ?? '导出失败（限流隔离或对话不可用）',
     })),
     ...untriedItems.map((i) => ({
       id: i.id,

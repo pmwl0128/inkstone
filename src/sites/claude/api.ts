@@ -24,6 +24,7 @@ import type {
   ClaudeOrganization,
   ClaudeSandboxFile,
 } from './types'
+import { activeOrgFromCookie, selectOrgId } from './organization'
 
 export const CLAUDE_THROTTLE: ThrottleConfig = {
   spacingBaseMs: 1500,
@@ -41,26 +42,21 @@ export const throttleStats = (): ReturnType<Fetcher['stats']> => fetcher.stats()
 
 const api = (path: string): string => `${location.origin}${path}`
 
-/**
- * 拿组织 id。优先问接口——cookie 里的 lastActiveOrg 在多组织账号下会随最近活跃
- * 组织变化，而接口给的是真实归属；接口不可用时才回退 cookie。
- */
+/** 匹配当前活跃工作区；多个成员组织且无法匹配时必须由用户选择。 */
 export async function resolveOrgId(cancel?: CancelToken): Promise<string> {
-  try {
-    const res = await fetcher.request(api('/api/organizations'), {}, cancel)
-    const data: unknown = await res.json()
-    const list = Array.isArray(data)
-      ? (data as ClaudeOrganization[])
-      : ((data as { organizations?: ClaudeOrganization[] })?.organizations ?? [])
-    const uuid = list.find((o) => typeof o?.uuid === 'string')?.uuid
-    if (uuid) return uuid
-  } catch {
-    ensureAlive(cancel)
-    /* 落到 cookie 兜底 */
-  }
-  const fromCookie = /(?:^|;\s*)lastActiveOrg=([^;]+)/.exec(document.cookie)?.[1]
-  if (fromCookie) return decodeURIComponent(fromCookie)
-  throw new Error('拿不到组织 id：请确认已登录 claude.ai 后重试')
+  const res = await fetcher.request(api('/api/organizations'), {}, cancel)
+  const data: unknown = await res.json()
+  const list = Array.isArray(data)
+    ? data
+    : (data as { organizations?: unknown } | null)?.organizations
+  if (!Array.isArray(list)) throw new Error('Claude 组织列表结构已变化')
+  ensureAlive(cancel)
+  return selectOrgId(list as ClaudeOrganization[], activeOrgFromCookie(document.cookie), (orgs) => {
+    const options = orgs.map((org, index) => `${index + 1}. ${org.name || `工作区 ${index + 1}`}`).join('\n')
+    const answer = window.prompt(`无法确定当前 Claude 工作区，请输入要导出的工作区序号：\n${options}`)
+    const index = answer && /^\d+$/.test(answer.trim()) ? Number(answer.trim()) - 1 : -1
+    return orgs[index]?.uuid ?? null
+  })
 }
 
 /** 从地址栏取当前对话 id；不在对话页时返回 null。 */

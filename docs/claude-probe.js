@@ -23,10 +23,13 @@
     const r = await fetch('/api/organizations', { credentials: 'include' })
     const d = await r.json()
     const list = Array.isArray(d) ? d : (d?.organizations ?? [])
-    log('组织数', list.length, '| cookie 与接口是否一致：', list[0]?.uuid === org)
-    if (list[0]?.uuid) org = list[0].uuid
-  } catch (e) {
-    log('取组织接口失败，改用 cookie：', String(e))
+    log('组织数', list.length, '| cookie 是否属于成员组织：', list.some((item) => item?.uuid === org))
+    if (!list.some((item) => item?.uuid === org)) {
+      if (list.length === 1 && list[0]?.uuid) org = list[0].uuid
+      else return log('无法确定当前工作区，请先运行 docs/claude-workspace-probe.js；停止探测')
+    }
+  } catch {
+    return log('取组织接口失败，无法核对成员组织，停止探测')
   }
   if (!org) return log('拿不到组织 id，请确认已登录')
 

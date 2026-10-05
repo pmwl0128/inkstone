@@ -78,4 +78,6 @@ export interface IRConversation {
   /** assistant 轮次的标题文字：ChatGPT / Claude */
   assistantHeading: string
   turns: IRTurn[]
+  /** 附件清单未能获取：正文可保存，但请求附件的导出不能记为完整成功。 */
+  assetDiscoveryFailed?: boolean
 }
