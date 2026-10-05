@@ -59,6 +59,7 @@ export function conversationToIR(
     tags: ['claude'],
     assistantHeading: 'Claude',
     turns,
+    ...(sandboxUnavailable ? { assetDiscoveryFailed: true } : {}),
   }
 }
 
