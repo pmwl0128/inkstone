@@ -59,6 +59,38 @@ async function hit(page, position, expected) {
 }
 
 try {
+  for (const width of [320, 360, 390, 844, 1440]) {
+    const run = await mount('chatgpt', '<header id="page-header"><button style="position:absolute;left:8px;top:10px;width:36px;height:36px">Menu</button><button style="position:absolute;left:52px;top:10px;width:120px;height:36px">Model</button><button data-testid="share-chat-button" style="position:absolute;right:90px;top:10px;width:60px;height:36px">Share</button><button data-testid="profile-button" style="position:absolute;right:16px;top:10px;width:44px;height:36px">Profile</button></header>', 'header', { width, height: 740 })
+    const fab = await run.page.locator('[data-inkstone] .fab').boundingBox()
+    assert.ok(fab && fab.x >= 8 && fab.x + fab.width <= width - 8, '密集顶栏的导出入口不能越出左右边界')
+    for (const button of await run.page.locator('header button').all()) {
+      const native = await button.boundingBox()
+      assert.ok(fab.x + fab.width <= native.x || native.x + native.width <= fab.x || fab.y + fab.height <= native.y || native.y + native.height <= fab.y, '回退定位不能盖住原生控件')
+    }
+    await hit(run.page, await point(run.page, '.fab'), 'inkstone')
+    await run.page.locator('[data-inkstone] .fab').click()
+    const panel = await run.page.locator('[data-inkstone] .panel').boundingBox()
+    assert.ok(panel && panel.x >= 16 && panel.x + panel.width <= width - 16)
+    assert.ok(panel.y >= fab.y + fab.height && panel.y + panel.height <= 740)
+    assert.deepEqual(run.errors, [])
+    if (width === 360) await run.page.screenshot({ path: join(outputDir, 'chatgpt-dense-header.png') })
+    await run.context.close()
+    console.log(`PASS: ${width}px 密集顶栏入口可见、不覆盖控件且可打开面板`)
+  }
+
+  const stable = await mount('chatgpt', '<header id="page-header"></header>')
+  const stableLeft = await stable.page.evaluate(() => {
+    const competing = document.createElement('header')
+    competing.style.width = 'calc(100% + 1px)'
+    document.body.prepend(competing)
+    window.dispatchEvent(new Event('resize'))
+    return document.querySelector('[data-inkstone]').shadowRoot.querySelector('.fab').getBoundingClientRect().left
+  })
+  assert.equal(stableLeft, 1280 - 36 - 8, '同步位置必须使用绑定锚点的定位方式，不能重新扫描其他 header 后静默变为 beside')
+  assert.deepEqual(stable.errors, [])
+  await stable.context.close()
+  console.log('PASS: 并存顶栏不改变已绑定锚点的完整顶栏定位方式')
+
   for (const viewport of [
     { width: 360, height: 740 },
     { width: 390, height: 844 },

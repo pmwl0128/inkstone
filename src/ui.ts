@@ -1,5 +1,5 @@
 import { sanitizeSubdir } from './core/render'
-import type { SiteUi } from './sites'
+import type { SiteHeaderAnchor, SiteUi } from './sites'
 import { computeFabPlacement } from './ui-position'
 
 export type ExportFormat = 'markdown' | 'json'
@@ -673,9 +673,13 @@ export function mountPanel(cb: PanelCallbacks): void {
   let curBottom = -1
   let curPanelTop = -1
   let curPanelLeft = -1
-  const findAnchor = (): HTMLElement | null =>
-    mode === 'header' ? cb.siteUi.headerAnchor() : cb.siteUi.composerAnchor()
+  const findAnchor = (): SiteHeaderAnchor | null => {
+    if (mode === 'header') return cb.siteUi.headerAnchor()
+    const element = cb.siteUi.composerAnchor()
+    return element ? { element, placement: 'beside' } : null
+  }
   let anchor: HTMLElement | null = null
+  let headerPlacement: SiteHeaderAnchor['placement'] = 'beside'
   const syncPos = (): boolean => {
     if (!anchor?.isConnected) return false // 没有锚点：位置保持原样，藏与不藏由 rebindAnchor 决定
     const r = anchor.getBoundingClientRect()
@@ -685,7 +689,7 @@ export function mountPanel(cb: PanelCallbacks): void {
       { width: window.innerWidth, height: window.innerHeight },
       fabSize(),
       fabGap(),
-      mode === 'header' ? cb.siteUi.headerPlacement?.(anchor) : undefined,
+      headerPlacement,
     )
     if (!placement) return false
     if (placement.panelTop != null && placement.panelTop !== curPanelTop) {
@@ -718,11 +722,14 @@ export function mountPanel(cb: PanelCallbacks): void {
   const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(syncPos)
   let anchorMissing = 0
   const rebindAnchor = (): boolean => {
-    const c = findAnchor()
-    if (c !== anchor) {
+    const target = findAnchor()
+    const c = target?.element ?? null
+    const placement = target?.placement ?? 'beside'
+    if (c !== anchor || placement !== headerPlacement) {
       if (anchor) closePanel()
       ro?.disconnect()
       anchor = c
+      headerPlacement = placement
       if (c) ro?.observe(c)
     }
     if (anchor?.isConnected) {

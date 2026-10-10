@@ -17,6 +17,7 @@ import type {
   Rgb,
   SiteAdapter,
   SiteConversationItem,
+  SiteHeaderAnchor,
   SiteIRContextResolver,
 } from '../types'
 import { conversationToIR } from './convert'
@@ -201,11 +202,16 @@ function rightHeaderActionAnchor(header: HTMLElement): HTMLElement | null {
   return controls[first]!
 }
 
-export function chatGPTHeaderAnchor(): HTMLElement | null {
-  const actionGroup = firstVisible(['#conversation-header-actions'])
-  if (actionGroup) return actionGroup
+function besideHeaderAnchor(element: HTMLElement, header: HTMLElement | null): SiteHeaderAnchor {
+  return element.getBoundingClientRect().left - 36 - 8 < 8
+    ? { element: header ?? element, placement: 'below' }
+    : { element, placement: 'beside' }
+}
 
+export function chatGPTHeaderAnchor(): SiteHeaderAnchor | null {
+  const actionGroup = firstVisible(['#conversation-header-actions'])
   const header = topPageHeader()
+  if (actionGroup) return besideHeaderAnchor(actionGroup, header)
   if (!header) return null
   const share = firstVisible(
     [
@@ -218,7 +224,8 @@ export function chatGPTHeaderAnchor(): HTMLElement | null {
     header,
   )
   // 新会话“工作”模式没有任何右侧动作；返回完整顶栏，由定位层放到右内边距。
-  return rightHeaderActionAnchor(header) ?? share ?? header
+  const control = rightHeaderActionAnchor(header) ?? share
+  return control ? besideHeaderAnchor(control, header) : { element: header, placement: 'inset' }
 }
 
 export function chatGPTComposerAnchor(): HTMLElement | null {
@@ -323,7 +330,6 @@ export const chatgptAdapter: SiteAdapter = {
 
   ui: {
     headerAnchor: chatGPTHeaderAnchor,
-    headerPlacement: (anchor) => anchor === topPageHeader() ? 'inset' : 'beside',
 
     composerAnchor: chatGPTComposerAnchor,
 

@@ -2,6 +2,17 @@ import { describe, expect, test } from 'bun:test'
 import { computeFabPlacement } from '../src/ui-position'
 
 describe('computeFabPlacement', () => {
+  test('密集顶栏的左侧锚点没有空间时，按钮移到下方而不是越界或盖住原生控件', () => {
+    const placement = computeFabPlacement(
+      'header',
+      { top: 10, right: 44, bottom: 46, left: 8, height: 36 },
+      { width: 360, height: 740 },
+      36,
+      8,
+    )
+    expect(placement).toEqual({ right: 8, bottom: 650, panelTop: 100 })
+  })
+
   test('Claude composer 贴在输入框表面右侧并垂直居中，面板尽量向右展开', () => {
     expect(
       computeFabPlacement(

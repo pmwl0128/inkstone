@@ -75,11 +75,13 @@ async function setup({ cookie = true, watermark = false, assets = true, format =
   return { context, page, calls, errors, restoreSandbox: () => { sandboxAvailable = true }, restoreAsset: () => { assetAvailable = true }, restoreDetail: () => { detailAvailable = true } }
 }
 
-async function checkChatGPTAssetRetry() {
+async function checkChatGPTAssetRetry(recover = true) {
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, acceptDownloads: true })
   const page = await context.newPage()
   const errors = []
   let assetAttempts = 0
+  const sharedIds = [id, '11111111-1111-4111-8111-111111111112', '11111111-1111-4111-8111-111111111113']
+  const detailAttempts = new Map()
   const chatRaw = {
     conversation_id: id, title: 'Retry attachment', update_time: updated, current_node: 'message',
     mapping: { message: { id: 'message', parent: null, children: [], message: {
@@ -93,12 +95,18 @@ async function checkChatGPTAssetRetry() {
     if (url.pathname === '/api/auth/session') return route.fulfill({ json: { accessToken: 'synthetic' } })
     if (url.pathname === '/backend-api/gizmos/snorlax/sidebar') return route.fulfill({ json: { items: [] } })
     if (url.pathname === '/backend-api/conversations') return route.fulfill({ json: {
-      items: url.searchParams.get('offset') === '0' ? [{ id, title: chatRaw.title, update_time: updated }] : [],
+      items: url.searchParams.get('offset') === '0' ? sharedIds.map((id, index) => ({ id, title: `Retry attachment ${index + 1}`, update_time: updated })) : [],
     } })
-    if (url.pathname === `/backend-api/conversation/${id}`) return route.fulfill({ json: chatRaw })
+    if (url.pathname.startsWith('/backend-api/conversation/')) {
+      const conversationId = url.pathname.split('/').at(-1)
+      assert.ok(sharedIds.includes(conversationId))
+      detailAttempts.set(conversationId, (detailAttempts.get(conversationId) ?? 0) + 1)
+      return route.fulfill({ json: { ...chatRaw, conversation_id: conversationId, title: `Retry attachment ${sharedIds.indexOf(conversationId) + 1}` } })
+    }
     if (url.pathname === '/backend-api/files/file-retry123/download') {
       assetAttempts++
-      return assetAttempts === 1
+      const retryPass = [...detailAttempts.values()].some((attempts) => attempts > 1)
+      return !recover || !retryPass
         ? route.fulfill({ status: 403, body: 'Unavailable attachment' })
         : route.fulfill({ json: { download_url: 'https://chatgpt.com/download/report.txt' } })
     }
@@ -112,24 +120,36 @@ async function checkChatGPTAssetRetry() {
     await page.locator('[data-inkstone] .fab.in').waitFor()
     await page.locator('[data-inkstone] .fab').click()
     const files = await exportAll(page)
-    assert.equal(assetAttempts, 2, '同一批次第二遍必须重新下载失败附件，不能复用失败占位缓存')
-    assert.equal(files['_failures.json'], undefined)
-    const note = Object.entries(files).find(([path]) => path.endsWith('.md'))
-    assert.match(strFromU8(note[1]), /Keep this body/)
-    assert.doesNotMatch(strFromU8(note[1]), /附件下载失败/)
-    assert.ok(Object.keys(files).some((path) => path.includes('/attachments/') && path.endsWith('report.txt')))
-    assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem('inkstone:wm:chatgpt:markdown'))), { [id]: updated })
-    assert.doesNotMatch(await page.locator('[data-inkstone] .status').innerText(), /附件失败/)
+    assert.equal(assetAttempts, 2, '三个对话共享失败附件时每遍只尝试一次；第二遍仍须重新下载')
+    assert.deepEqual([...detailAttempts.values()], [2, 2, 2], '每个不完整对话仍需参与第二遍')
+    const notes = Object.entries(files).filter(([path]) => path.endsWith('.md'))
+    assert.equal(notes.length, 3)
+    for (const [, bytes] of notes) {
+      assert.match(strFromU8(bytes), /Keep this body/)
+      if (recover) assert.doesNotMatch(strFromU8(bytes), /附件下载失败/)
+      else assert.match(strFromU8(bytes), /附件下载失败/)
+    }
+    const watermark = await page.evaluate(() => JSON.parse(localStorage.getItem('inkstone:wm:chatgpt:markdown')))
+    if (recover) {
+      assert.equal(files['_failures.json'], undefined)
+      assert.equal(Object.keys(files).filter((path) => path.includes('/attachments/') && path.endsWith('report.txt')).length, 1)
+      assert.deepEqual(watermark, Object.fromEntries(sharedIds.map((id) => [id, updated])))
+      assert.doesNotMatch(await page.locator('[data-inkstone] .status').innerText(), /附件失败/)
+    } else {
+      assert.equal(JSON.parse(strFromU8(files['_failures.json'])).length, 3)
+      assert.deepEqual(watermark, {})
+      assert.match(await page.locator('[data-inkstone] .status').innerText(), /附件失败 1 个/)
+    }
     assert.deepEqual(errors, [])
   } finally {
     await context.close()
   }
-  console.log('PASS: ChatGPT 同批次第二遍重新下载失败附件，恢复后正文/汇总/水位线一致')
+  console.log(`PASS: 三个 ChatGPT 对话共享失败附件，每遍只请求一次；${recover ? '第二遍恢复后补齐全部正文与水位线' : '持续失败保留三个失败记录且不推进水位线'}`)
 }
 
 async function exportAll(page) {
   await page.locator('[data-inkstone] [data-seg="scope"] button[data-v="all"]').click()
-  const downloading = page.waitForEvent('download', { timeout: 45000 })
+  const downloading = page.waitForEvent('download', { timeout: 60000 })
   await page.locator('[data-inkstone] .go').click()
   const download = await downloading
   const files = unzipSync(await readFile(await download.path()))
@@ -139,6 +159,7 @@ async function exportAll(page) {
 
 try {
   await checkChatGPTAssetRetry()
+  await checkChatGPTAssetRetry(false)
   const missingAsset = await setup({ assetUnavailable: true, watermark: true })
   await missingAsset.page.locator('[data-inkstone] [data-seg="scope"] button[data-v="all"]').click()
   await missingAsset.page.locator('[data-inkstone] .adv-toggle').click()
