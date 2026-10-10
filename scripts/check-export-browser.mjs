@@ -104,7 +104,7 @@ async function checkChatGPTAssetRetry() {
     }
     if (url.pathname === '/download/report.txt') return route.fulfill({ contentType: 'text/plain', body: 'Final report' })
     if (url.pathname.startsWith('/backend-api/')) throw new Error(`未预期的 ChatGPT 模拟接口：${url.pathname}`)
-    return route.fulfill({ contentType: 'text/html', body: body.replace('<button>Share</button>', '<button data-testid="share-chat-button">Share</button>') })
+    return route.fulfill({ contentType: 'text/html', body: '<html><body style="margin:0;background:white"><header id="page-header" style="position:fixed;left:0;top:0;width:100%;height:56px"><button data-testid="share-chat-button" style="position:absolute;right:20px;top:12px;width:60px;height:36px">Share</button></header></body></html>' })
   })
   try {
     await page.goto(`https://chatgpt.com/c/${id}`)
