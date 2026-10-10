@@ -95,7 +95,6 @@ export function replayArtifacts(messages: readonly ClaudeMessage[]): Map<string,
 
   // 每个 artifact 最后一次成功的内容变更处嵌入终稿
   for (const doc of docs.values()) {
-    if (doc.content === '') continue
     const op = ops.get(doc.lastGoodKey)
     if (op) op.finalContent = doc.content
   }

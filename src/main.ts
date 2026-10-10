@@ -311,15 +311,15 @@ function createProcessor(
   const maxFileBytes = opts.maxFileMB * 1024 * 1024
   const notesPrefix = opts.notesDir ? `${opts.notesDir}/` : ''
   const attachPrefix = opts.attachmentsDir ? `${opts.attachmentsDir}/` : ''
-  // 失败/超限只写进正文占位文字，完成文案里要显式报数，否则像无事发生
-  let assetsFailed = 0
+  // 失败附件保留重试机会；超限是用户设置下的有意跳过。
+  const failedAssetIds = new Set<string>()
   let assetsSkipped = 0
   let discoveryFailed = 0
   const resolveIRContext = site.createIRContextResolver?.(session, cancel)
 
-  async function resolveAsset(a: AssetRef): Promise<string> {
+  async function resolveAsset(a: AssetRef): Promise<{ replacement: string; failed: boolean }> {
     const cached = assetCache.get(a.fileId)
-    if (cached != null) return cached
+    if (cached != null) return { replacement: cached, failed: false }
     let replacement: string
     // 元数据 size 不可靠（library 文件报 0），仅作快速跳过；真正的护栏在 fetchBinary
     const cap = a.kind === 'file' ? maxFileBytes : MAX_IMAGE_BYTES
@@ -346,19 +346,23 @@ function createProcessor(
           assetsSkipped++
           replacement = skippedNote(a, e.actualBytes, cap)
         } else {
-          assetsFailed++
-          replacement = `*(附件下载失败：${a.name ?? a.fileId} — ${String(e)})*`
+          failedAssetIds.add(a.fileId)
+          return {
+            replacement: `*(附件下载失败：${a.name ?? a.fileId} — ${String(e)})*`,
+            failed: true,
+          }
         }
       }
     }
+    failedAssetIds.delete(a.fileId)
     assetCache.set(a.fileId, replacement)
-    return replacement
+    return { replacement, failed: false }
   }
 
   /** 完成文案的附件异常后缀（正常时空串）；具体条目见各 .md 内的占位说明。 */
   function assetSummary(): string {
     return (
-      (assetsFailed > 0 ? `，附件失败 ${assetsFailed} 个` : '') +
+      (failedAssetIds.size > 0 ? `，附件失败 ${failedAssetIds.size} 个，下次增量导出重试` : '') +
       (assetsSkipped > 0 ? `，附件超限跳过 ${assetsSkipped} 个` : '') +
       (discoveryFailed > 0 ? `，${discoveryFailed} 个对话附件发现失败，正文已保留，下次增量导出重试` : '')
     )
@@ -380,10 +384,11 @@ function createProcessor(
     const irContext = resolveIRContext ? await resolveIRContext(item.id, raw) : undefined
     checkBatchSafety?.()
     const ir = site.toIR(raw, item.id, irContext)
-    const incompleteReason = opts.assets && ir.assetDiscoveryFailed
-      ? '附件发现失败：正文已保留，未推进水位线，下次增量导出重试'
-      : undefined
-    if (incompleteReason) discoveryFailed++
+    const incompleteReasons: string[] = []
+    if (opts.assets && ir.assetDiscoveryFailed) {
+      incompleteReasons.push('附件发现失败')
+      discoveryFailed++
+    }
     const { markdown, title, assets } = renderConversation(ir, {
       thoughts: opts.thoughts,
       toolTraces: opts.toolTraces,
@@ -391,6 +396,7 @@ function createProcessor(
     })
     let md = markdown
     let assetIdx = 0
+    let assetFailed = false
     for (const a of assets) {
       assetIdx++
       if (!opts.assets) {
@@ -401,10 +407,16 @@ function createProcessor(
       if (assets.length > 3 && assetIdx % 5 === 0) {
         panel.setStatus(`「${(item.title || title).slice(0, 14)}」附件 ${assetIdx}/${assets.length}…`)
       }
-      md = md.split(assetToken(a.fileId)).join(await resolveAsset(a))
+      const result = await resolveAsset(a)
+      assetFailed ||= result.failed
+      md = md.split(assetToken(a.fileId)).join(result.replacement)
     }
+    if (assetFailed) incompleteReasons.push('附件下载失败')
     const path = `${notesPrefix}${filenameFor(title, item.id)}`
     await sink.put(path, strToU8(md))
+    const incompleteReason = incompleteReasons.length > 0
+      ? `${incompleteReasons.join('、')}：正文已保留，未推进水位线，下次增量导出重试`
+      : undefined
     return { path, incompleteReason }
   }
 
@@ -579,6 +591,7 @@ async function exportItems(
           }
         } catch (e) {
           if (e instanceof CancelledError) throw e
+          delete wmDraft[item.id]
           failed.push(item)
           if (e instanceof BatchSafetyError) {
             safetyReason = e.message

@@ -64,6 +64,16 @@ describe('linearize', () => {
 })
 
 describe('artifact 折叠', () => {
+  test('rewrite 清空内容时仍输出空终稿，不能留下悬空的终稿见后提示', () => {
+    const conv = withBlocks([
+      { type: 'tool_use', name: 'artifacts', input: { command: 'create', id: 'a', content: 'old' } },
+      { type: 'tool_use', name: 'artifacts', input: { command: 'rewrite', id: 'a', content: '' } },
+    ])
+    const ops = replayArtifacts(conv.chat_messages!)
+    expect(ops.get('a1#1')?.finalContent).toBe('')
+    expect(md(conv)).toContain('> [!abstract] Artifact')
+    expect(md(conv)).not.toContain('old')
+  })
   test('create + update 折叠成终稿，只在最后一次编辑处出现', () => {
     const out = md(fixture)
     expect(out).toContain('function a() {')
@@ -217,6 +227,18 @@ describe('内容块分发', () => {
 })
 
 describe('附件', () => {
+  test('没有 uuid 的不同附件地址使用稳定的安全标识，不能因 URL 尾部相同而落盘重名', () => {
+    const conv = withBlocks([{ type: 'text', text: 'images' }])
+    conv.chat_messages![0]!.files = [
+      { file_kind: 'image', file_name: 'image.png', preview_url: '/api/files/first/preview' },
+      { file_kind: 'image', file_name: 'image.png', preview_url: '/api/files/second/preview' },
+    ]
+    const first = renderConversation(conversationToIR(conv)).assets
+    const again = renderConversation(conversationToIR(conv)).assets
+    expect(first.map((asset) => asset.fileId)).toEqual(again.map((asset) => asset.fileId))
+    expect(first[0]!.fileId.slice(-8)).not.toBe(first[1]!.fileId.slice(-8))
+    expect(first.every((asset) => /^[a-z0-9-]+$/i.test(asset.fileId))).toBe(true)
+  })
   test('图片留占位符，文本抽取件整块内联', () => {
     const out = md(fixture)
     expect(out).toContain('%%INKSTONE-ASSET-img-1%%')

@@ -30,13 +30,15 @@ const limitPaths = {
   asset: `/api/organizations/${team}/conversations/${id}/wiggle/download-file`,
 }
 
-async function setup({ cookie = true, watermark = false, assets = true, format = 'markdown', limitAt = null } = {}) {
+async function setup({ cookie = true, watermark = false, assets = true, format = 'markdown', limitAt = null, assetUnavailable = false, detailUnavailable = false } = {}) {
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, acceptDownloads: true })
   if (cookie) await context.addCookies([{ name: 'lastActiveOrg', value: team, url: 'https://claude.ai' }])
   const page = await context.newPage()
   const calls = []
   const errors = []
-  let sandboxAvailable = false
+  let sandboxAvailable = assetUnavailable
+  let assetAvailable = !assetUnavailable
+  let detailAvailable = !detailUnavailable
   page.on('pageerror', (error) => errors.push(error.message))
   await page.route('**/*', async (route) => {
     const url = new URL(route.request().url())
@@ -49,8 +51,12 @@ async function setup({ cookie = true, watermark = false, assets = true, format =
     if (path.endsWith('/wiggle/list-files')) return sandboxAvailable || limitAt === 'asset'
       ? route.fulfill({ json: { files_metadata: [{ path: '/mnt/user-data/outputs/report.md', size: 12 }] } })
       : route.fulfill({ status: 503, body: 'Unavailable' })
-    if (path.endsWith('/wiggle/download-file')) return route.fulfill({ contentType: 'text/markdown', body: 'Final report' })
-    if (path.endsWith(`/chat_conversations/${id}`)) return route.fulfill({ json: raw })
+    if (path.endsWith('/wiggle/download-file')) return assetAvailable
+      ? route.fulfill({ contentType: 'text/markdown', body: 'Final report' })
+      : route.fulfill({ status: 503, body: 'Unavailable asset' })
+    if (path.endsWith(`/chat_conversations/${id}`)) return detailAvailable
+      ? route.fulfill({ json: raw })
+      : route.fulfill({ status: 404, body: 'Unavailable conversation' })
     if (path.endsWith('/chat_conversations')) return route.fulfill({ json: [{ uuid: id, name: raw.name, updated_at: updated }] })
     throw new Error(`未预期的模拟接口：${path}`)
   })
@@ -66,7 +72,59 @@ async function setup({ cookie = true, watermark = false, assets = true, format =
     await page.locator('[data-inkstone] input[data-opt="assets"]').uncheck()
   }
   if (format === 'json') await page.locator('[data-inkstone] [data-seg="format"] button[data-v="json"]').click()
-  return { context, page, calls, errors, restoreSandbox: () => { sandboxAvailable = true } }
+  return { context, page, calls, errors, restoreSandbox: () => { sandboxAvailable = true }, restoreAsset: () => { assetAvailable = true }, restoreDetail: () => { detailAvailable = true } }
+}
+
+async function checkChatGPTAssetRetry() {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, acceptDownloads: true })
+  const page = await context.newPage()
+  const errors = []
+  let assetAttempts = 0
+  const chatRaw = {
+    conversation_id: id, title: 'Retry attachment', update_time: updated, current_node: 'message',
+    mapping: { message: { id: 'message', parent: null, children: [], message: {
+      id: 'message', author: { role: 'user' }, content: { content_type: 'text', parts: ['Keep this body'] },
+      metadata: { attachments: [{ id: 'file-retry123', name: 'report.txt', size: 12 }] },
+    } } },
+  }
+  page.on('pageerror', (error) => errors.push(error.message))
+  await page.route('**/*', (route) => {
+    const url = new URL(route.request().url())
+    if (url.pathname === '/api/auth/session') return route.fulfill({ json: { accessToken: 'synthetic' } })
+    if (url.pathname === '/backend-api/gizmos/snorlax/sidebar') return route.fulfill({ json: { items: [] } })
+    if (url.pathname === '/backend-api/conversations') return route.fulfill({ json: {
+      items: url.searchParams.get('offset') === '0' ? [{ id, title: chatRaw.title, update_time: updated }] : [],
+    } })
+    if (url.pathname === `/backend-api/conversation/${id}`) return route.fulfill({ json: chatRaw })
+    if (url.pathname === '/backend-api/files/file-retry123/download') {
+      assetAttempts++
+      return assetAttempts === 1
+        ? route.fulfill({ status: 403, body: 'Unavailable attachment' })
+        : route.fulfill({ json: { download_url: 'https://chatgpt.com/download/report.txt' } })
+    }
+    if (url.pathname === '/download/report.txt') return route.fulfill({ contentType: 'text/plain', body: 'Final report' })
+    if (url.pathname.startsWith('/backend-api/')) throw new Error(`未预期的 ChatGPT 模拟接口：${url.pathname}`)
+    return route.fulfill({ contentType: 'text/html', body: body.replace('<button>Share</button>', '<button data-testid="share-chat-button">Share</button>') })
+  })
+  try {
+    await page.goto(`https://chatgpt.com/c/${id}`)
+    await page.addScriptTag({ content: source })
+    await page.locator('[data-inkstone] .fab.in').waitFor()
+    await page.locator('[data-inkstone] .fab').click()
+    const files = await exportAll(page)
+    assert.equal(assetAttempts, 2, '同一批次第二遍必须重新下载失败附件，不能复用失败占位缓存')
+    assert.equal(files['_failures.json'], undefined)
+    const note = Object.entries(files).find(([path]) => path.endsWith('.md'))
+    assert.match(strFromU8(note[1]), /Keep this body/)
+    assert.doesNotMatch(strFromU8(note[1]), /附件下载失败/)
+    assert.ok(Object.keys(files).some((path) => path.includes('/attachments/') && path.endsWith('report.txt')))
+    assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem('inkstone:wm:chatgpt:markdown'))), { [id]: updated })
+    assert.doesNotMatch(await page.locator('[data-inkstone] .status').innerText(), /附件失败/)
+    assert.deepEqual(errors, [])
+  } finally {
+    await context.close()
+  }
+  console.log('PASS: ChatGPT 同批次第二遍重新下载失败附件，恢复后正文/汇总/水位线一致')
 }
 
 async function exportAll(page) {
@@ -80,6 +138,43 @@ async function exportAll(page) {
 }
 
 try {
+  await checkChatGPTAssetRetry()
+  const missingAsset = await setup({ assetUnavailable: true, watermark: true })
+  await missingAsset.page.locator('[data-inkstone] [data-seg="scope"] button[data-v="all"]').click()
+  await missingAsset.page.locator('[data-inkstone] .adv-toggle').click()
+  await missingAsset.page.locator('[data-inkstone] input[data-opt="incremental"]').uncheck()
+  const partial = await exportAll(missingAsset.page)
+  assert.match(strFromU8(partial['_failures.json']), /附件下载失败/)
+  const note = Object.entries(partial).find(([path]) => path.endsWith('.md'))
+  assert.ok(note)
+  assert.match(strFromU8(note[1]), /Body survives unavailable sandbox.*附件下载失败/s)
+  assert.deepEqual(await missingAsset.page.evaluate(() => JSON.parse(localStorage.getItem('inkstone:wm:claude:markdown'))), {})
+  missingAsset.restoreAsset()
+  await missingAsset.page.locator('[data-inkstone] input[data-opt="incremental"]').check()
+  const recovered = await exportAll(missingAsset.page)
+  assert.equal(recovered['_failures.json'], undefined)
+  assert.ok(Object.keys(recovered).some((path) => path.includes('/attachments/')))
+  assert.deepEqual(await missingAsset.page.evaluate(() => JSON.parse(localStorage.getItem('inkstone:wm:claude:markdown'))), { [id]: updated })
+  assert.deepEqual(missingAsset.errors, [])
+  await missingAsset.context.close()
+  console.log('PASS: 附件下载失败保留正文/失败汇总且不推进水位线；恢复后增量补齐')
+
+  const missingDetail = await setup({ detailUnavailable: true, watermark: true })
+  await missingDetail.page.locator('[data-inkstone] [data-seg="scope"] button[data-v="all"]').click()
+  await missingDetail.page.locator('[data-inkstone] .adv-toggle').click()
+  await missingDetail.page.locator('[data-inkstone] input[data-opt="incremental"]').uncheck()
+  const unavailable = await exportAll(missingDetail.page)
+  assert.ok(unavailable['_failures.json'])
+  assert.deepEqual(await missingDetail.page.evaluate(() => JSON.parse(localStorage.getItem('inkstone:wm:claude:markdown'))), {})
+  missingDetail.restoreDetail()
+  missingDetail.restoreSandbox()
+  await missingDetail.page.locator('[data-inkstone] input[data-opt="incremental"]').check()
+  assert.equal((await exportAll(missingDetail.page))['_failures.json'], undefined)
+  assert.deepEqual(await missingDetail.page.evaluate(() => JSON.parse(localStorage.getItem('inkstone:wm:claude:markdown'))), { [id]: updated })
+  assert.deepEqual(missingDetail.errors, [])
+  await missingDetail.context.close()
+  console.log('PASS: 重导失败删除旧水位线，详情恢复后增量重新导出')
+
   for (const limitAt of ['prepare', 'list', 'detail', 'sandbox', 'asset']) {
     const run = await setup({ limitAt })
     await run.page.locator('[data-inkstone] [data-seg="scope"] button[data-v="all"]').click()
