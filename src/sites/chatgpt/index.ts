@@ -185,16 +185,17 @@ function rightHeaderActionAnchor(header: HTMLElement): HTMLElement | null {
     .filter(isVisible)
     .filter((el) => {
       const rect = el.getBoundingClientRect()
-      return rect.right >= rightZone && rect.top < headerRect.bottom + 8
+      return rect.top >= headerRect.top - 8 && rect.top < headerRect.bottom + 8
     })
     .sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left)
-  if (controls.length === 0) return null
+  if (controls.length === 0 || controls[controls.length - 1]!.getBoundingClientRect().right < rightZone) return null
 
   let first = controls.length - 1
   while (first > 0) {
     const prev = controls[first - 1]!.getBoundingClientRect()
     const next = controls[first]!.getBoundingClientRect()
-    if (next.left - prev.right > 20 || Math.abs(next.top - prev.top) > 10) break
+    // 间隙必须容得下 36px 按钮和 8px 间距，否则仍需沿整组左移，避免盖住前一控件。
+    if (next.left - prev.right >= 36 + 8 || Math.abs(next.top - prev.top) > 10) break
     first--
   }
   return controls[first]!
@@ -216,9 +217,8 @@ export function chatGPTHeaderAnchor(): HTMLElement | null {
     ],
     header,
   )
-  if (share) return share
   // 新会话“工作”模式没有任何右侧动作；返回完整顶栏，由定位层放到右内边距。
-  return rightHeaderActionAnchor(header) ?? header
+  return rightHeaderActionAnchor(header) ?? share ?? header
 }
 
 export function chatGPTComposerAnchor(): HTMLElement | null {

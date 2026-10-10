@@ -65,15 +65,20 @@ try {
     { width: 844, height: 390 },
     { width: 1440, height: 900 },
   ]) {
-    for (const fullHeader of [false, true]) {
-      const run = await mount('chatgpt', fullHeader ? '<header id="page-header"></header>' :
-        '<header id="page-header"><div id="conversation-header-actions" class="actions" style="right:0;width:200px;display:flex"><button>Files</button><button>Share</button><button>Profile</button></div></header>', 'header', viewport)
+    for (const layout of ['actions', 'fallback', 'unlabelled-share', 'unlabelled-actions', 'unlabelled-spaced']) {
+      const fullHeader = layout === 'fallback'
+      const unlabelled = layout.startsWith('unlabelled')
+      const spaced = layout === 'unlabelled-spaced'
+      const html = fullHeader ? '<header id="page-header"></header>' : unlabelled
+        ? `<header id="page-header"><button style="position:absolute;left:16px;top:10px;width:80px;height:36px">Model</button><div data-audit-actions class="actions" style="right:0;width:200px;display:flex;gap:${spaced ? 24 : 8}px"><button style="width:${spaced ? 56 : 80}px;flex:none">Files</button><button ${layout === 'unlabelled-share' ? 'data-testid="share-chat-button"' : ''} style="width:${spaced ? 48 : 60}px;flex:none">Share</button><button data-testid="profile-button" style="width:${spaced ? 48 : 44}px;flex:none">Profile</button></div></header>`
+        : '<header id="page-header"><div id="conversation-header-actions" data-audit-actions class="actions" style="right:0;width:200px;display:flex"><button>Files</button><button>Share</button><button>Profile</button></div></header>'
+      const run = await mount('chatgpt', html, 'header', viewport)
       const fab = await run.page.locator('[data-inkstone] .fab').boundingBox()
       assert.ok(fab && fab.x >= 0 && fab.x + fab.width <= viewport.width)
       if (fullHeader) {
         assert.equal(fab.x + fab.width, viewport.width - 8, '完整顶栏兜底必须明确使用右内边距')
       } else {
-        const actions = await run.page.locator('#conversation-header-actions').boundingBox()
+        const actions = await run.page.locator('[data-audit-actions]').boundingBox()
         assert.ok(fab.x + fab.width <= actions.x - 8, '宽动作组不能误判为完整顶栏或与导出按钮重叠')
       }
       await hit(run.page, await point(run.page, '.fab'), 'inkstone')
@@ -82,11 +87,11 @@ try {
       const panel = await run.page.locator('[data-inkstone] .panel').boundingBox()
       assert.ok(panel && panel.x >= 16 && panel.x + panel.width <= viewport.width - 16, '顶栏导出面板不能越出视口')
       assert.ok(panel.y >= 0 && panel.y + panel.height <= viewport.height, '导出面板必须保留完整可见的操作区域')
-      if (viewport.width === 360) await run.page.screenshot({ path: join(outputDir, `chatgpt-narrow-${fullHeader ? 'fallback' : 'actions'}.png`) })
+      if (viewport.width === 360) await run.page.screenshot({ path: join(outputDir, `chatgpt-narrow-${layout}.png`) })
       assert.deepEqual(run.errors, [])
       assert.ok(run.requests.every((url) => !url.includes('/api/')))
       await run.context.close()
-      console.log(`PASS: ${viewport.width}x${viewport.height} ${fullHeader ? '完整顶栏右内边距' : '200px 动作组左侧'}，按钮无重叠且可打开面板`)
+      console.log(`PASS: ${viewport.width}x${viewport.height} ${layout}，按钮无重叠且可打开面板`)
     }
   }
 
