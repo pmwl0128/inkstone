@@ -99,16 +99,18 @@ export async function listSandboxFiles(
   }
   const files = (data as { files_metadata: unknown[] }).files_metadata
 
-  return files.flatMap((item): ClaudeSandboxFile[] => {
-    if (!item || typeof item !== 'object') return []
+  return files.map((item): ClaudeSandboxFile => {
+    if (!item || typeof item !== 'object') throw new Error('Claude 沙箱文件清单结构已变化：文件条目缺少 path')
     const raw = item as Record<string, unknown>
-    if (typeof raw['path'] !== 'string' || raw['path'] === '') return []
+    if (typeof raw['path'] !== 'string' || raw['path'] === '') {
+      throw new Error('Claude 沙箱文件清单结构已变化：文件条目缺少 path')
+    }
     const path = raw['path']
     const downloadUrl = api(
       `/api/organizations/${orgId}/conversations/${conversationId}/wiggle/download-file` +
         `?path=${encodeURIComponent(path)}`,
     )
-    return [{ ...(raw as Omit<ClaudeSandboxFile, 'download_url'>), path, download_url: downloadUrl }]
+    return { ...(raw as Omit<ClaudeSandboxFile, 'download_url'>), path, download_url: downloadUrl }
   })
 }
 
@@ -205,9 +207,11 @@ export function createConversationPager(
 
         // 有返回、但全是见过的：要么服务端忽略了分页参数每次给同一批，要么已到底。
         // 两种都不该重试——再问一次只会拿到同样的东西。
-        const valid = items.filter((i) => typeof i?.uuid === 'string' && i.uuid !== '')
-        if (valid.length === 0) throw new Error('Claude 对话列表结构已变化：返回条目缺少 uuid')
-        const fresh = valid.filter((i) => !seen.has(i.uuid))
+        if (items.some((i) => typeof i?.uuid !== 'string' || i.uuid === '')) {
+          throw new Error('Claude 对话列表结构已变化：返回条目缺少 uuid')
+        }
+        const unique = new Map(items.map((i) => [i.uuid, i]))
+        const fresh = [...unique.values()].filter((i) => !seen.has(i.uuid))
         if (fresh.length === 0) {
           done = true
           return { items: [], done: true }

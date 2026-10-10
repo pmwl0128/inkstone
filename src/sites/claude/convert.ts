@@ -411,8 +411,12 @@ function outputRank(path: string): number {
 }
 
 function hashSandboxFile(conversationId: string, path: string): string {
+  return hashText(`${conversationId}\0${normalizePath(path)}`)
+}
+
+function hashText(value: string): string {
   let hash = 0x811c9dc5
-  for (const ch of `${conversationId}\0${normalizePath(path)}`) {
+  for (const ch of value) {
     hash ^= ch.charCodeAt(0)
     hash = Math.imul(hash, 0x01000193)
   }
@@ -485,9 +489,9 @@ function attachmentBlocks(msg: ClaudeMessage): IRBlock[] {
   return out
 }
 
-/** 附件在正文里的占位键：优先用服务端 uuid，缺失时用地址兜底（同一附件只下载一次）。 */
+/** 优先用服务端 uuid；缺失时摘要地址，避免 URL 路径进入文件名或相同尾缀覆盖。 */
 function assetId(f: { file_uuid?: string | null; uuid?: string | null }, url: string): string {
-  return str(f.file_uuid) || str(f.uuid) || url
+  return str(f.file_uuid) || str(f.uuid) || `claude-url-${hashText(url)}`
 }
 
 const EXT_LANG: Record<string, string> = {

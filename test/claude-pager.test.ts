@@ -61,6 +61,20 @@ describe('claude 分页器', () => {
     )
   })
 
+  test('同一页的重复 uuid 只返回一次，offset 仍按原始页长度推进', async () => {
+    const { calls, fetchPage } = pages((_c, n) => n === 1 ? [items(1)[0]!, items(1)[0]!, ...items(1, 1)] : [])
+    const pager = createConversationPager('org', undefined, { fetchPage, emptyRetryBaseMs: 0, maxItems: 2 })
+    expect((await pager.next()).items.map((item) => item.uuid)).toEqual(['c0', 'c1'])
+    await pager.next()
+    expect(calls[1]?.offset).toBe(3)
+  })
+
+  test('混有缺失 uuid 的条目时停止，不能静默丢弃对话并宣称列表完整', async () => {
+    const { fetchPage } = pages(() => [...items(1), { name: 'missing id' } as ClaudeConversationListItem])
+    const pager = createConversationPager('org', undefined, { fetchPage, emptyRetryBaseMs: 0 })
+    await expect(pager.next()).rejects.toThrow('缺少 uuid')
+  })
+
   test('首页即空 = 账号没有对话，不重试', async () => {
     const { calls, fetchPage } = pages(() => [])
     const all = await drain(createConversationPager('org', undefined, { fetchPage, emptyRetryBaseMs: 0 }))
