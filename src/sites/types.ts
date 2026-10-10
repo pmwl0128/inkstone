@@ -20,6 +20,8 @@ export type Rgb = [number, number, number]
 export interface SiteUi {
   /** 顶栏锚点（贴在分享按钮左侧，面板向下展开）；找不到返回 null */
   headerAnchor(): HTMLElement | null
+  /** 默认贴在动作组左侧；完整顶栏兜底应明确选择右内边距。 */
+  headerPlacement?(anchor: HTMLElement): 'beside' | 'inset'
   /** 输入框锚点（贴在输入框旁，面板向上展开）；找不到返回 null */
   composerAnchor(): HTMLElement | null
   /** 页面是否处于暗色 */

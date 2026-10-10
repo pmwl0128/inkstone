@@ -1,10 +1,14 @@
 // 使用实际构建产物验证 DOM 锚点和浏览器层叠；所有页面请求均返回本地合成页面。
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+import { mkdir, readFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 
 const source = await readFile(new URL('../dist/inkstone.user.js', import.meta.url), 'utf8')
 const probe = await readFile(new URL('../docs/ui-overlay-probe.js', import.meta.url), 'utf8')
+const outputDir = process.env.INKSTONE_BROWSER_OUTPUT_DIR ?? fileURLToPath(new URL('../dist/', import.meta.url))
+await mkdir(outputDir, { recursive: true })
 const browser = await chromium.launch({
   headless: true,
   ...(process.env.INKSTONE_BROWSER_EXECUTABLE ? { executablePath: process.env.INKSTONE_BROWSER_EXECUTABLE } : {}),
@@ -25,8 +29,8 @@ const fixtures = [
     composer: '<div class="composer"><div data-composer-markdown contenteditable="true" role="textbox"></div></div>', headerLeft: null },
 ]
 
-async function mount(site, html, mode = 'header') {
-  const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, reducedMotion: 'reduce' })
+async function mount(site, html, mode = 'header', viewport = { width: 1280, height: 900 }) {
+  const context = await browser.newContext({ viewport, reducedMotion: 'reduce' })
   const page = await context.newPage()
   const errors = []
   const requests = []
@@ -55,6 +59,37 @@ async function hit(page, position, expected) {
 }
 
 try {
+  for (const viewport of [
+    { width: 360, height: 740 },
+    { width: 390, height: 844 },
+    { width: 844, height: 390 },
+    { width: 1440, height: 900 },
+  ]) {
+    for (const fullHeader of [false, true]) {
+      const run = await mount('chatgpt', fullHeader ? '<header id="page-header"></header>' :
+        '<header id="page-header"><div id="conversation-header-actions" class="actions" style="right:0;width:200px;display:flex"><button>Files</button><button>Share</button><button>Profile</button></div></header>', 'header', viewport)
+      const fab = await run.page.locator('[data-inkstone] .fab').boundingBox()
+      assert.ok(fab && fab.x >= 0 && fab.x + fab.width <= viewport.width)
+      if (fullHeader) {
+        assert.equal(fab.x + fab.width, viewport.width - 8, '完整顶栏兜底必须明确使用右内边距')
+      } else {
+        const actions = await run.page.locator('#conversation-header-actions').boundingBox()
+        assert.ok(fab.x + fab.width <= actions.x - 8, '宽动作组不能误判为完整顶栏或与导出按钮重叠')
+      }
+      await hit(run.page, await point(run.page, '.fab'), 'inkstone')
+      await run.page.locator('[data-inkstone] .fab').click()
+      assert.equal(await run.page.locator('[data-inkstone] .panel').isVisible(), true)
+      const panel = await run.page.locator('[data-inkstone] .panel').boundingBox()
+      assert.ok(panel && panel.x >= 16 && panel.x + panel.width <= viewport.width - 16, '顶栏导出面板不能越出视口')
+      assert.ok(panel.y >= 0 && panel.y + panel.height <= viewport.height, '导出面板必须保留完整可见的操作区域')
+      if (viewport.width === 360) await run.page.screenshot({ path: join(outputDir, `chatgpt-narrow-${fullHeader ? 'fallback' : 'actions'}.png`) })
+      assert.deepEqual(run.errors, [])
+      assert.ok(run.requests.every((url) => !url.includes('/api/')))
+      await run.context.close()
+      console.log(`PASS: ${viewport.width}x${viewport.height} ${fullHeader ? '完整顶栏右内边距' : '200px 动作组左侧'}，按钮无重叠且可打开面板`)
+    }
+  }
+
   for (const fixture of fixtures) {
     const run = await mount('chatgpt',
       '<div id="conversation-header-actions" class="hidden"></div><header id="decoy-header"></header>' + fixture.header + fixture.composer)
@@ -110,7 +145,7 @@ try {
     assert.equal(before.fab.style.zIndex, '40')
     assert.equal(before.panel.style.zIndex, '41')
     assert.equal(before.fabHitTests[0].inkstoneIsTop, true)
-    await run.page.screenshot({ path: new URL(`../dist/claude-${mode}-normal.png`, import.meta.url).pathname })
+    await run.page.screenshot({ path: join(outputDir, `claude-${mode}-normal.png`) })
     const panelPoint = await point(run.page, '.panel')
     await run.page.evaluate(() => {
       const overlay = document.createElement('div')
@@ -125,7 +160,7 @@ try {
     assert.equal(covered.fabHitTests[0].inkstoneIsTop, false)
     assert.equal(covered.panelHitTests[0].inkstoneIsTop, false)
     assert.equal(covered.visibleOverlays.length, 1)
-    await run.page.screenshot({ path: new URL(`../dist/claude-${mode}-overlay.png`, import.meta.url).pathname })
+    await run.page.screenshot({ path: join(outputDir, `claude-${mode}-overlay.png`) })
     await run.page.evaluate(() => document.querySelector('#page-overlay').remove())
     await hit(run.page, await point(run.page, '.fab'), 'inkstone')
     await run.page.locator('[data-inkstone] .fab').click()

@@ -323,6 +323,7 @@ export const chatgptAdapter: SiteAdapter = {
 
   ui: {
     headerAnchor: chatGPTHeaderAnchor,
+    headerPlacement: (anchor) => anchor === topPageHeader() ? 'inset' : 'beside',
 
     composerAnchor: chatGPTComposerAnchor,
 

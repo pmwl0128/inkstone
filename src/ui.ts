@@ -235,6 +235,8 @@ const STYLE = `
   /* header 模式：面板从按钮下方展开 */
   :host([data-pos="header"]) .panel {
     bottom: auto; top: var(--panel-top, 56px);
+    /* 宽动作组会把按钮推向左侧；304px 面板仍需保留两侧至少 16px 的视口边距。 */
+    right: clamp(16px, var(--fab-right, 20px), calc(100vw - 304px - 16px));
     max-height: min(72vh, calc(100vh - var(--panel-top, 56px) - 24px));
     transform-origin: 100% 0;
   }
@@ -683,6 +685,7 @@ export function mountPanel(cb: PanelCallbacks): void {
       { width: window.innerWidth, height: window.innerHeight },
       fabSize(),
       fabGap(),
+      mode === 'header' ? cb.siteUi.headerPlacement?.(anchor) : undefined,
     )
     if (!placement) return false
     if (placement.panelTop != null && placement.panelTop !== curPanelTop) {

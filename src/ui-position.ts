@@ -25,6 +25,7 @@ export function computeFabPlacement(
   viewport: { width: number; height: number },
   size: number,
   gap: number,
+  headerPlacement: 'beside' | 'inset' = 'beside',
 ): FabPlacement | null {
   if (
     !Number.isFinite(rect.top) ||
@@ -46,11 +47,10 @@ export function computeFabPlacement(
 
   if (mode === 'header') {
     if (rect.top < 0) return null
-    const anchorWidth = rect.right - rect.left
     // 新会话的某些 ChatGPT 变体没有 Share/Profile 等右侧动作，adapter 会把
-    // 完整顶栏作为兜底锚点。此时按钮放进顶栏右内边距，而不是放到顶栏左侧视口外。
+    // 完整顶栏作为兜底锚点并明确指定 inset；宽动作组仍贴左侧，不按宽度猜测。
     const right =
-      anchorWidth >= viewport.width * 0.5
+      headerPlacement === 'inset'
         ? Math.max(8, Math.round(viewport.width - rect.right + 8))
         : Math.round(viewport.width - rect.left + gap)
     return {

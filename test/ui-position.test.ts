@@ -59,8 +59,32 @@ describe('computeFabPlacement', () => {
         { width: 630, height: 898 },
         36,
         8,
+        'inset',
       ),
     ).toEqual({ right: 8, bottom: 854, panelTop: 62 })
+  })
+
+  test('360px 窗口中超过一半宽度的动作组仍贴左侧，按钮不重叠', () => {
+    const placement = computeFabPlacement(
+      'header',
+      { top: 10, right: 360, bottom: 46, left: 160, height: 36 },
+      { width: 360, height: 740 },
+      36,
+      8,
+    )
+    expect(placement).toEqual({ right: 208, bottom: 694, panelTop: 56 })
+    expect(360 - placement!.right).toBeLessThanOrEqual(160 - 8)
+  })
+
+  test('360px 窗口的完整顶栏兜底仍使用右内边距', () => {
+    expect(computeFabPlacement(
+      'header',
+      { top: 0, right: 360, bottom: 52, left: 0, height: 52 },
+      { width: 360, height: 740 },
+      36,
+      8,
+      'inset',
+    )).toEqual({ right: 8, bottom: 696, panelTop: 62 })
   })
 
   test('ChatGPT 四种探针结构的 header 锚点均避开原生控件', () => {
@@ -77,14 +101,15 @@ describe('computeFabPlacement', () => {
       {
         rect: { top: 0, right: 630, bottom: 52, left: 0, height: 52 },
         expected: { right: 8, bottom: 854, panelTop: 62 },
+        headerPlacement: 'inset' as const,
       }, // 新会话页 · 工作：完整顶栏兜底
       {
         rect: { top: 8, right: 622, bottom: 44, left: 586, height: 36 },
         expected: { right: 52, bottom: 854, panelTop: 54 },
       }, // 新会话页 · 聊天：右侧动作
     ]
-    for (const { rect, expected } of cases) {
-      expect(computeFabPlacement('header', rect, viewport, 36, 8)).toEqual(expected)
+    for (const { rect, expected, headerPlacement } of cases) {
+      expect(computeFabPlacement('header', rect, viewport, 36, 8, headerPlacement)).toEqual(expected)
     }
   })
 
