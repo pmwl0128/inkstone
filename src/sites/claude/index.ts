@@ -1,5 +1,6 @@
 import type { AssetRef } from '../../core/ir'
 import type { CancelToken } from '../../core/fetcher'
+import { BatchSafetyError } from '../../core/batch-safety'
 import type { AssetPayload, Rgb, SiteAdapter, SiteConversationItem } from '../types'
 import {
   createConversationPager,
@@ -40,7 +41,7 @@ export const claudeAdapter: SiteAdapter = {
       try {
         return { sandboxFiles: await listSandboxFiles(session, id, cancel) }
       } catch (error) {
-        if (cancel?.cancelled) throw error
+        if (cancel?.cancelled || error instanceof BatchSafetyError) throw error
         // 附件发现失败不应吞掉整篇正文；转换层会在文件卡片原位留下说明。
         return { sandboxFiles: [], sandboxUnavailable: true }
       }

@@ -37,6 +37,8 @@ export class SizeLimitError extends Error {
 
 export interface CancelToken {
   cancelled: boolean
+  /** 本次导出的请求护栏；发请求和进入重试等待前检查，不影响其他导出。 */
+  beforeRequest?: () => void
 }
 
 export const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
@@ -63,7 +65,7 @@ export interface ThrottleConfig {
   /** 每这么多个请求整体歇一次（贴合突发桶回填节奏）；0 表示不歇 */
   restEveryN: number
   restDurationMs: number
-  /** 单个请求的最大重试次数 */
+  /** 单个请求的最大重试次数，不含首次请求；1 表示最多发出 2 次 HTTP 请求。 */
   maxAttempts: number
 }
 
@@ -110,6 +112,7 @@ export function createFetcher(cfg: ThrottleConfig): Fetcher {
   const acquireSlot = async (cancel?: CancelToken): Promise<void> => {
     for (;;) {
       ensureAlive(cancel)
+      cancel?.beforeRequest?.()
       const now = Date.now()
       const target = Math.max(nextSlotAt, cooldownUntil)
       if (now >= target) {
@@ -136,6 +139,9 @@ export function createFetcher(cfg: ThrottleConfig): Fetcher {
     let headerless429s = 0
     for (let attempt = 0; ; attempt++) {
       await acquireSlot(cancel)
+      // acquireSlot 返回后其他并发请求可能已消耗预算或触发限流，再核对一次。
+      ensureAlive(cancel)
+      cancel?.beforeRequest?.()
       requests++
       const res = await fetch(url, { credentials: 'include', ...init })
       if (res.ok) {
@@ -159,6 +165,8 @@ export function createFetcher(cfg: ThrottleConfig): Fetcher {
           cooldownUntil = Math.max(cooldownUntil, Date.now() + 15_000)
         }
       }
+      // 先更新 429 统计，再检查批次护栏，避免先等待 Retry-After 或退避再熔断。
+      cancel?.beforeRequest?.()
       if (!retryable || attempt >= cfg.maxAttempts) {
         throw new ApiError(res.status, `HTTP ${res.status}: ${url}`)
       }
