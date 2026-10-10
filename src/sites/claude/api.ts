@@ -31,7 +31,7 @@ export const CLAUDE_THROTTLE: ThrottleConfig = {
   spacingMaxMs: 8000,
   restEveryN: 40,
   restDurationMs: 30_000,
-  // 首次失败后最多再试一次；批量层随后依据完整 429 统计决定是否熔断。
+  // 首次失败后最多再试一次；批量护栏在内部重试等待前检查完整 429 统计。
   maxAttempts: 1,
 }
 

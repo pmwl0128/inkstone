@@ -217,6 +217,7 @@ async function exportSelection(
     }
     panel.setStatus('获取登录态…')
     const checkBatchSafety = createBatchSafetyGuard(site.batch!.policy, site.throttleStats)
+    cancel.beforeRequest = checkBatchSafety
     const session = await site.prepare(cancel)
     checkBatchSafety()
     await exportItems(format, items, 0, session, cancel, panel, opts, sink, checkBatchSafety)
@@ -476,6 +477,7 @@ async function startExport(
   try {
     // prepare 也是本批次的网络请求，必须在它之前建立统计基线。
     const checkBatchSafety = createBatchSafetyGuard(site.batch!.policy, site.throttleStats)
+    cancel.beforeRequest = checkBatchSafety
     panel.setStatus('获取登录态…')
     const session = await site.prepare(cancel)
     checkBatchSafety()
@@ -529,6 +531,7 @@ async function exportItems(
   const sink = sinkIn ?? zipSink()
   const policy = site.batch!.policy
   const checkBatchSafety = checkBatchSafetyIn ?? createBatchSafetyGuard(policy, site.throttleStats)
+  cancel.beforeRequest = checkBatchSafety
   // 水位线合并推进：导出成功的对话记下 update_time，其余保持原状
   const wmDraft: Watermark = { ...loadWatermark(wmKey(kind)) }
   const proc = createProcessor(kind, session, cancel, panel, opts, sink, checkBatchSafety)

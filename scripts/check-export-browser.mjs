@@ -22,8 +22,15 @@ const raw = {
     { type: 'tool_use', name: 'present_files', input: { filepaths: ['/mnt/user-data/outputs/report.md'] } },
   ] }],
 }
+const limitPaths = {
+  prepare: '/api/organizations',
+  list: `/api/organizations/${team}/chat_conversations`,
+  detail: `/api/organizations/${team}/chat_conversations/${id}`,
+  sandbox: `/api/organizations/${team}/conversations/${id}/wiggle/list-files`,
+  asset: `/api/organizations/${team}/conversations/${id}/wiggle/download-file`,
+}
 
-async function setup({ cookie = true, watermark = false, assets = true, format = 'markdown' } = {}) {
+async function setup({ cookie = true, watermark = false, assets = true, format = 'markdown', limitAt = null } = {}) {
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, acceptDownloads: true })
   if (cookie) await context.addCookies([{ name: 'lastActiveOrg', value: team, url: 'https://claude.ai' }])
   const page = await context.newPage()
@@ -36,9 +43,10 @@ async function setup({ cookie = true, watermark = false, assets = true, format =
     const path = url.pathname
     if (!path.startsWith('/api/')) return route.fulfill({ contentType: 'text/html', body })
     calls.push(path)
+    if (path === limitPaths[limitAt]) return route.fulfill({ status: 429, headers: { 'Retry-After': '60' }, body: 'Rate limited' })
     if (path === '/api/organizations') return route.fulfill({ json: [{ uuid: personal, name: 'Personal' }, { uuid: team, name: 'Team' }] })
     assert.ok(path.startsWith(`/api/organizations/${team}/`), '每个对话/附件请求必须使用当前 team 工作区')
-    if (path.endsWith('/wiggle/list-files')) return sandboxAvailable
+    if (path.endsWith('/wiggle/list-files')) return sandboxAvailable || limitAt === 'asset'
       ? route.fulfill({ json: { files_metadata: [{ path: '/mnt/user-data/outputs/report.md', size: 12 }] } })
       : route.fulfill({ status: 503, body: 'Unavailable' })
     if (path.endsWith('/wiggle/download-file')) return route.fulfill({ contentType: 'text/markdown', body: 'Final report' })
@@ -72,6 +80,26 @@ async function exportAll(page) {
 }
 
 try {
+  for (const limitAt of ['prepare', 'list', 'detail', 'sandbox', 'asset']) {
+    const run = await setup({ limitAt })
+    await run.page.locator('[data-inkstone] [data-seg="scope"] button[data-v="all"]').click()
+    const began = Date.now()
+    await run.page.locator('[data-inkstone] .go').click()
+    await run.page.waitForFunction(() => {
+      const root = document.querySelector('[data-inkstone]').shadowRoot
+      return !root.querySelector('.go').disabled && root.querySelector('.status').textContent.includes('Retry-After')
+    }, undefined, { timeout: 20_000 })
+    const status = await run.page.locator('[data-inkstone] .status').innerText()
+    assert.match(status, /安全中止/)
+    assert.ok(Date.now() - began < 20_000, '不能先等待 60 秒 Retry-After 冷却')
+    assert.equal(run.calls.filter((path) => path === limitPaths[limitAt]).length, 1, '全局限流响应不能触发内部重试')
+    assert.equal(run.calls.at(-1), limitPaths[limitAt], '限流后不能继续请求后续接口')
+    assert.deepEqual(await run.page.evaluate(() => JSON.parse(localStorage.getItem('inkstone:wm:claude:markdown') || '{}')), {})
+    assert.deepEqual(run.errors, [])
+    await run.context.close()
+    console.log(`PASS: Claude ${limitAt} 首次 Retry-After 立即安全中止，不重试、不推进水位线`)
+  }
+
   const run = await setup()
   const diagnostic = await run.page.evaluate(workspaceProbe)
   assert.equal(diagnostic.workspace.activeMembershipIndex, 2)
